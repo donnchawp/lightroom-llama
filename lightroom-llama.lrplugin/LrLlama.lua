@@ -163,6 +163,22 @@ or
     end
 end
 
+local function addKeywordsWithParent(catalog, photo, keywords)
+    if keywords and type(keywords) == "table" then
+        -- First create or get the parent 'llm' keyword
+        local llmKeyword = catalog:createKeyword("llm", nil, true, nil, true)
+
+        for _, keyword in ipairs(keywords) do
+            if keyword and keyword ~= "" then
+                -- Create child keyword under 'llm' parent
+                local childKeyword = catalog:createKeyword(keyword, nil, true, llmKeyword, true)
+                -- Add the keyword object to the photo
+                photo:addKeyword(childKeyword)
+            end
+        end
+    end
+end
+
 local function main()
     -- Get the active catalog
     local catalog = LrApplication.activeCatalog()
@@ -185,6 +201,7 @@ local function main()
         props.prompt = "Caption this photo"
         props.title = selectedPhoto:getFormattedMetadata('title')
         props.caption = selectedPhoto:getFormattedMetadata('caption')
+        props.keywords = ""
         props.response = ""
         props.useCurrentData = props.title ~= "" or props.caption ~= ""
         props.useSystemPrompt = true
@@ -224,6 +241,19 @@ local function main()
                     value = LrView.bind("caption"), -- Bind to the new response property
                     width = 400,
                     height = 100
+                },
+                f:spacer{
+                    height = 10
+                },
+                f:static_text{
+                    title = "Keywords:",
+                    alignment = 'left'
+                },
+                f:spacer{f:label_spacing{}},
+                f:edit_field{
+                    value = LrView.bind("keywords"),
+                    width = 400,
+                    height = 60
                 },
                 f:spacer{
                     height = 10
@@ -296,7 +326,12 @@ local function main()
                             props.response = apiResponse
                             props.title = apiResponse.title
                             props.caption = apiResponse.caption
-                            props.keywords = apiResponse.keywords
+                            -- Convert keywords array to comma-separated string for display
+                            if apiResponse.keywords and type(apiResponse.keywords) == "table" then
+                                props.keywords = table.concat(apiResponse.keywords, ", ")
+                            else
+                                props.keywords = ""
+                            end
                             props.status = "Ready"
                             props.statusColor = LrColor(0.149, 0.616, 0.412)
                         end)
@@ -322,10 +357,17 @@ local function main()
             catalog:withWriteAccessDo("Save Llama metadata", function()
                 selectedPhoto:setRawMetadata("title", props.title)
                 selectedPhoto:setRawMetadata("caption", props.caption)
-                -- selectedPhoto:setRawMetadata("keywords", props.keywords)
+                -- Parse keywords from comma-separated string and add with llm parent
+                if props.keywords and props.keywords ~= "" then
+                    local keywordList = {}
+                    for keyword in string.gmatch(props.keywords, "([^,]+)") do
+                        table.insert(keywordList, keyword:match("^%s*(.-)%s*$")) -- trim whitespace
+                    end
+                    addKeywordsWithParent(catalog, selectedPhoto, keywordList)
+                end
             end)
 
-            LrDialogs.message("Metadata Saved", "Title and caption have been saved to the photo.", "info")
+            LrDialogs.message("Metadata Saved", "Title, caption, and keywords have been saved to the photo.", "info")
         end
     end)
 end
