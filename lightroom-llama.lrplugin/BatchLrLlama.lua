@@ -25,59 +25,113 @@ JSON = (assert(loadfile(LrPathUtils.child(_PLUGIN.path, "JSON.lua"))))()
 -- Shared functions (duplicated from LrLlama.lua for now)
 local function exportThumbnail(photo)
     local tempPath = LrFileUtils.chooseUniqueFileName(LrPathUtils.getStandardFilePath('temp') .. "/thumbnail.jpg")
+    logger:info("Attempting to export thumbnail to: " .. tempPath)
 
+    -- Check if temp directory is accessible
+    local tempDir = LrPathUtils.getStandardFilePath('temp')
+    if not LrFileUtils.exists(tempDir) then
+        logger:error("Temp directory does not exist: " .. tempDir)
+        return nil
+    end
+
+    local thumbnailSaved = false
     local success, result = photo:requestJpegThumbnail(512, 512, function(jpegData)
         if jpegData then
             local tempFile = io.open(tempPath, "wb")
-            tempFile:write(jpegData)
-            tempFile:close()
-            logger:info("Thumbnail saved to " .. tempPath)
-            return true
+            if tempFile then
+                tempFile:write(jpegData)
+                tempFile:close()
+                thumbnailSaved = true
+                logger:info("Thumbnail saved to " .. tempPath)
+                return true
+            else
+                logger:error("Could not open temp file for writing: " .. tempPath)
+                return false
+            end
+        else
+            logger:error("No JPEG data received from photo")
+            return false
         end
-        return false
     end)
 
-    if success then
-        return tempPath
+    if success and thumbnailSaved then
+        -- Verify the file was actually created
+        if LrFileUtils.exists(tempPath) then
+            logger:info("Thumbnail export successful: " .. tempPath)
+            return tempPath
+        else
+            logger:error("Thumbnail file was not created: " .. tempPath)
+            return nil
+        end
     else
-        logger:warn("Failed to export thumbnail")
+        logger:warn("Failed to export thumbnail. Success: " .. tostring(success) .. ", Result: " .. tostring(result))
         return nil
     end
 end
 
 local function base64EncodeImage(imagePath)
+    logger:info("Attempting to encode image: " .. imagePath)
+
+    -- Check if file exists
+    if not LrFileUtils.exists(imagePath) then
+        logger:error("Image file does not exist: " .. imagePath)
+        return nil
+    end
+
     local file = io.open(imagePath, "rb")
     if not file then
-        logger:error("Could not open file: " .. imagePath)
+        logger:error("Could not open file for reading: " .. imagePath)
         return nil
     end
 
     local binaryData = file:read("*all")
     file:close()
 
+    if not binaryData or #binaryData == 0 then
+        logger:error("No data read from file: " .. imagePath)
+        return nil
+    end
+
     local base64Data = LrStringUtils.encodeBase64(binaryData)
+    if not base64Data then
+        logger:error("Failed to encode image to base64: " .. imagePath)
+        return nil
+    end
+
+    logger:info("Successfully encoded image to base64. Size: " .. #binaryData .. " bytes")
     return base64Data
 end
 
 local function sendDataToApi(photo, prompt, currentData, useCurrentData, useSystemPrompt)
     logger:info("Sending data to API for batch processing")
-    local thumbnailPath = exportThumbnail(photo)
-    if not thumbnailPath then
-        return nil, "Failed to export thumbnail"
+
+    -- Try to export thumbnail with retry
+    local thumbnailPath = nil
+    for attempt = 1, 3 do
+        thumbnailPath = exportThumbnail(photo)
+        if thumbnailPath then
+            break
+        end
+        logger:warn("Thumbnail export attempt " .. attempt .. " failed, retrying...")
+        LrTasks.sleep(0.5) -- Wait 500ms before retry
     end
-    
+
+    if not thumbnailPath then
+        return nil, "Failed to export thumbnail after 3 attempts"
+    end
+
     local encodedImage = base64EncodeImage(thumbnailPath)
     if not encodedImage then
         return nil, "Failed to encode image"
     end
-    
+
     local url = "http://localhost:11434/api/generate"
 
     local postData = {
         model = model,
-        prompt = (useCurrentData and "Title: "..currentData.title .. " Caption: "..currentData.caption .. prompt) or prompt,
+        prompt = (useCurrentData and "Title: "..(currentData.title or ""):gsub('"', '\\"') .. " Caption: "..(currentData.caption or ""):gsub('"', '\\"') .. " " .. prompt) or prompt,
         format = "json",
-        system = useSystemPrompt and [[You are an AI tasked with creating a JSON object containing a `title`, a `caption`, and a list of `keywords` based on a given piece of content (such as an image or video). 
+        system = useSystemPrompt and [[You are an AI tasked with creating a JSON object containing a `title`, a `caption`, and a list of `keywords` based on a given piece of content (such as an image or video).
 
 Please follow these detailed guidelines for creating excellent metadata:
 
@@ -105,7 +159,7 @@ Please follow these detailed guidelines for creating excellent metadata:
 ```json
 {
   "title": "string",
-  "caption": "string", 
+  "caption": "string",
   "keywords": ["string"]
 }
 ```
@@ -149,13 +203,13 @@ local function addKeywordsWithParent(catalog, photo, keywords)
     if not keywords or type(keywords) ~= "table" then
         return
     end
-    
+
     -- First create or get the parent 'llm' keyword
     local llmKeyword = catalog:createKeyword("llm", nil, true, nil, true)
     if not llmKeyword then
         error("Failed to create or get 'llm' parent keyword")
     end
-    
+
     for _, keyword in ipairs(keywords) do
         if keyword and keyword ~= "" then
             -- Create child keyword under 'llm' parent
@@ -172,11 +226,11 @@ end
 
 local function getLlmKeywordsFromPhoto(photo)
     local llmKeywords = {}
-    
+
     -- Wrap in pcall to catch any errors
     local success, result = pcall(function()
         local allKeywords = photo:getRawMetadata("keywords")
-        
+
         if allKeywords then
             for _, keyword in ipairs(allKeywords) do
                 local parent = keyword:getParent()
@@ -186,19 +240,19 @@ local function getLlmKeywordsFromPhoto(photo)
             end
         end
     end)
-    
+
     if not success then
         logger:warn("Error getting LLM keywords: " .. tostring(result))
         return {} -- Return empty array on error
     end
-    
+
     return llmKeywords
 end
 
 -- Batch processing functions
 local function processPhotosApiOnly(photos, settings)
     local results = {}
-    
+
     -- Only do API processing, no metadata saving
     for i, photo in ipairs(photos) do
         local result = {
@@ -207,29 +261,29 @@ local function processPhotosApiOnly(photos, settings)
             error = nil,
             metadata = nil
         }
-        
+
         -- Get current metadata
         local currentData = {
             title = photo:getFormattedMetadata('title') or "",
             caption = photo:getFormattedMetadata('caption') or ""
         }
-        
+
         -- Process photo with API
         local apiResponse, apiError = sendDataToApi(photo, settings.prompt, currentData, settings.useCurrentData, settings.useSystemPrompt)
-        
+
         if apiResponse then
             result.success = true
             result.metadata = apiResponse
         else
             result.error = apiError or "Unknown API error"
         end
-        
+
         table.insert(results, result)
-        
+
         -- Small delay between photos
         LrTasks.sleep(0.5)
     end
-    
+
     return results
 end
 
@@ -239,7 +293,7 @@ local function saveResultsMetadata(catalog, results)
         if result.success and result.metadata then
             local apiResponse = result.metadata
             local photo = result.photo
-            
+
             local saveSuccess, saveError = pcall(function()
                 catalog:withWriteAccessDo("Save Llama metadata", function()
                     if apiResponse.title then
@@ -250,14 +304,14 @@ local function saveResultsMetadata(catalog, results)
                     end
                 end)
             end)
-            
+
             if not saveSuccess then
                 result.success = false
                 result.error = "Failed to save metadata: " .. tostring(saveError)
             end
         end
     end
-    
+
     return results
 end
 
@@ -265,7 +319,7 @@ local function showBatchResults(results)
     local successful = 0
     local failed = 0
     local skipped = 0
-    
+
     for _, result in ipairs(results) do
         if result.success then
             if result.error and string.find(result.error, "Skipped") then
@@ -277,14 +331,14 @@ local function showBatchResults(results)
             failed = failed + 1
         end
     end
-    
+
     -- Only show popup if there are failures
     if failed > 0 then
         local message = string.format(
             "Batch processing complete!\n\nSuccessful: %d\nSkipped: %d\nFailed: %d\n\nTotal processed: %d photos",
             successful, skipped, failed, #results
         )
-        
+
         local failedPhotos = {}
         for _, result in ipairs(results) do
             if not result.success then
@@ -292,9 +346,9 @@ local function showBatchResults(results)
                 table.insert(failedPhotos, photoName .. ": " .. (result.error or "Unknown error"))
             end
         end
-        
+
         message = message .. "\n\nFailed photos:\n" .. table.concat(failedPhotos, "\n")
-        
+
         LrDialogs.message("Batch Processing Results", message, "info")
     end
     -- If all successful, no popup is shown
@@ -307,9 +361,9 @@ local function showBatchDialog(selectedPhotos)
         props.useCurrentData = false
         props.useSystemPrompt = true
         props.skipExisting = true
-        
+
         local f = LrView.osFactory()
-        
+
         local c = f:view{
             bind_to_object = props,
             f:column{
@@ -318,7 +372,7 @@ local function showBatchDialog(selectedPhotos)
                     font = "<system/bold>"
                 },
                 f:spacer{height = 20},
-                
+
                 f:static_text{
                     title = "Prompt:"
                 },
@@ -329,34 +383,34 @@ local function showBatchDialog(selectedPhotos)
                     height = 60
                 },
                 f:spacer{height = 15},
-                
+
                 f:checkbox{
                     title = "Use current title and caption data",
                     value = LrView.bind("useCurrentData")
                 },
                 f:spacer{height = 10},
-                
+
                 f:checkbox{
                     title = "Use system prompt (recommended)",
                     value = LrView.bind("useSystemPrompt")
                 },
                 f:spacer{height = 10},
-                
+
                 f:checkbox{
                     title = "Skip photos that already have LLM keywords",
                     value = LrView.bind("skipExisting")
                 },
                 f:spacer{height = 20},
-                
+
                 f:separator{width = 400},
                 f:spacer{height = 10},
-                
+
                 f:static_text{
                     title = "Model: " .. model,
                     font = "<system>"
                 },
                 f:spacer{height = 10},
-                
+
                 f:static_text{
                     title = "Note: This process may take several minutes depending on the number of photos.",
                     font = "<system>",
@@ -364,13 +418,13 @@ local function showBatchDialog(selectedPhotos)
                 }
             }
         }
-        
+
         local result = LrDialogs.presentModalDialog({
             title = "Batch Process with Llama",
             contents = c,
             actionVerb = "Start Processing"
         })
-        
+
         if result == "ok" then
             local settings = {
                 prompt = props.prompt,
@@ -378,34 +432,34 @@ local function showBatchDialog(selectedPhotos)
                 useSystemPrompt = props.useSystemPrompt,
                 skipExisting = props.skipExisting
             }
-            
+
             -- Process with progress scope
             local results = {}
             local catalog = LrApplication.activeCatalog()
-            
+
             LrFunctionContext.callWithContext("batchProcessing", function(context)
                 local progressScope = LrProgressScope({
                     title = "Processing photos with Llama",
                     functionContext = context
                 })
-                
+
                 progressScope:setPortionComplete(0, #selectedPhotos)
-                
+
                 for i, photo in ipairs(selectedPhotos) do
                     if progressScope:isCanceled() then
                         break
                     end
-                    
+
                     local photoName = photo:getFormattedMetadata('fileName') or "Photo " .. i
                     progressScope:setCaption("Processing: " .. photoName)
-                    
+
                     local result = {
                         photo = photo,
                         success = false,
                         error = nil,
                         metadata = nil
                     }
-                    
+
                     -- Check if we should skip photos with existing LLM keywords
                     local shouldSkip = false
                     if settings.skipExisting then
@@ -416,17 +470,17 @@ local function showBatchDialog(selectedPhotos)
                             shouldSkip = true
                         end
                     end
-                    
+
                     if not shouldSkip then
                         -- Get current metadata
                         local currentData = {
                             title = photo:getFormattedMetadata('title') or "",
                             caption = photo:getFormattedMetadata('caption') or ""
                         }
-                        
+
                         -- Process photo with API
                         local apiResponse, apiError = sendDataToApi(photo, settings.prompt, currentData, settings.useCurrentData, settings.useSystemPrompt)
-                        
+
                         if apiResponse then
                             result.success = true
                             result.metadata = apiResponse
@@ -434,21 +488,21 @@ local function showBatchDialog(selectedPhotos)
                             result.error = apiError or "Unknown API error"
                         end
                     end
-                    
+
                     table.insert(results, result)
                     progressScope:setPortionComplete(i, #selectedPhotos)
                 end
-                
+
                 progressScope:done()
             end)
-            
+
             -- Save all metadata in a single write access call
             catalog:withWriteAccessDo("Save Llama batch metadata", function()
                 for _, result in ipairs(results) do
                     if result.success and result.metadata then
                         local apiResponse = result.metadata
                         local photo = result.photo
-                        
+
                         if apiResponse.title then
                             photo:setRawMetadata("title", apiResponse.title)
                         end
@@ -461,7 +515,7 @@ local function showBatchDialog(selectedPhotos)
                     end
                 end
             end)
-            
+
             showBatchResults(results)
         end
     end)
@@ -471,17 +525,17 @@ end
 local function main()
     local catalog = LrApplication.activeCatalog()
     local selectedPhotos = catalog:getTargetPhotos()
-    
+
     if #selectedPhotos == 0 then
         LrDialogs.message("No photos selected", "Please select one or more photos to process.", "critical")
         return
     end
-    
+
     if #selectedPhotos == 1 then
-        local result = LrDialogs.confirm("Single photo selected", 
+        local result = LrDialogs.confirm("Single photo selected",
             "You have selected only one photo. Would you like to use the regular Lightroom Llama dialog instead?",
             "Use Regular Dialog", "Continue with Batch", "Cancel")
-        
+
         if result == "ok" then
             -- Could call the regular dialog here, but for now just return
             LrDialogs.message("Suggestion", "Please use the 'Lightroom Llama...' menu item for single photos.", "info")
@@ -490,7 +544,7 @@ local function main()
             return
         end
     end
-    
+
     showBatchDialog(selectedPhotos)
 end
 
