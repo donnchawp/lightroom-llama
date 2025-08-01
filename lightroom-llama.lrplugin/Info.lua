@@ -16,6 +16,12 @@ return {
         file = "LrLlama.lua"
     }, {
         title = "Batch Process with Llama...",
-        file = "BatchLrLlama.lua"
+        file = "BatchLrLlama.lua",
+        enabledWhen = "photosSelected"
+    }},
+    LrExportMenuItems = {{
+        title = "Batch Process with Llama...",
+        file = "BatchLrLlama.lua",
+        enabledWhen = "photosSelected"
     }}
 }
