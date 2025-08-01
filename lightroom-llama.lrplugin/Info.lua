@@ -13,13 +13,18 @@ return {
     LrSdkMinimumVersion = 5.0,
     LrLibraryMenuItems = {{
         title = "Lightroom Llama...",
-        file = "LrLlama.lua"
+        file = "LrLlama.lua",
+        enabledWhen = "photosSelected"
     }, {
         title = "Batch Process with Llama...",
         file = "BatchLrLlama.lua",
         enabledWhen = "photosSelected"
     }},
     LrExportMenuItems = {{
+        title = "Lightroom Llama...",
+        file = "LrLlama.lua",
+        enabledWhen = "photosSelected"
+    }, {
         title = "Batch Process with Llama...",
         file = "BatchLrLlama.lua",
         enabledWhen = "photosSelected"
