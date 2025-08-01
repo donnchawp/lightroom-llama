@@ -14,5 +14,8 @@ return {
     LrLibraryMenuItems = {{
         title = "Lightroom Llama...",
         file = "LrLlama.lua"
+    }, {
+        title = "Batch Process with Llama...",
+        file = "BatchLrLlama.lua"
     }}
 }
