@@ -12,6 +12,7 @@ local LrStringUtils = import 'LrStringUtils'
 local LrBinding = import "LrBinding"
 local LrColor = import "LrColor"
 local LrProgressScope = import "LrProgressScope"
+local LrPrefs = import "LrPrefs"
 
 local logger = LrLogger('BatchLrLlama')
 logger:enable("logfile")
@@ -357,10 +358,16 @@ end
 local function showBatchDialog(selectedPhotos)
     LrFunctionContext.callWithContext("showBatchDialog", function(context)
         local props = LrBinding.makePropertyTable(context)
-        props.prompt = "Caption this photo"
-        props.useCurrentData = false
-        props.useSystemPrompt = true
-        props.skipExisting = true
+        local prefs = LrPrefs.prefsForPlugin()
+
+        -- Initialize with default values or saved preferences
+        props.prompt = prefs.batchPrompt or "Caption this photo"
+        props.useCurrentData = prefs.batchUseCurrentData or false
+        props.useSystemPrompt = prefs.batchUseSystemPrompt ~= false -- Default to true
+        props.skipExisting = prefs.batchSkipExisting ~= false -- Default to true
+        props.generateTitle = prefs.batchGenerateTitle ~= false -- Default to true
+        props.generateCaption = prefs.batchGenerateCaption ~= false -- Default to true
+        props.generateKeywords = prefs.batchGenerateKeywords ~= false -- Default to true
 
         local f = LrView.osFactory()
 
@@ -402,6 +409,30 @@ local function showBatchDialog(selectedPhotos)
                 },
                 f:spacer{height = 20},
 
+                f:static_text{
+                    title = "Generate:",
+                    font = "<system/bold>"
+                },
+                f:spacer{height = 10},
+
+                f:checkbox{
+                    title = "Title",
+                    value = LrView.bind("generateTitle")
+                },
+                f:spacer{height = 5},
+
+                f:checkbox{
+                    title = "Caption",
+                    value = LrView.bind("generateCaption")
+                },
+                f:spacer{height = 5},
+
+                f:checkbox{
+                    title = "Keywords",
+                    value = LrView.bind("generateKeywords")
+                },
+                f:spacer{height = 20},
+
                 f:separator{width = 400},
                 f:spacer{height = 10},
 
@@ -426,11 +457,23 @@ local function showBatchDialog(selectedPhotos)
         })
 
         if result == "ok" then
+            -- Save preferences for next time
+            prefs.batchPrompt = props.prompt
+            prefs.batchUseCurrentData = props.useCurrentData
+            prefs.batchUseSystemPrompt = props.useSystemPrompt
+            prefs.batchSkipExisting = props.skipExisting
+            prefs.batchGenerateTitle = props.generateTitle
+            prefs.batchGenerateCaption = props.generateCaption
+            prefs.batchGenerateKeywords = props.generateKeywords
+
             local settings = {
                 prompt = props.prompt,
                 useCurrentData = props.useCurrentData,
                 useSystemPrompt = props.useSystemPrompt,
-                skipExisting = props.skipExisting
+                skipExisting = props.skipExisting,
+                generateTitle = props.generateTitle,
+                generateCaption = props.generateCaption,
+                generateKeywords = props.generateKeywords
             }
 
             -- Process with progress scope
@@ -503,13 +546,13 @@ local function showBatchDialog(selectedPhotos)
                         local apiResponse = result.metadata
                         local photo = result.photo
 
-                        if apiResponse.title then
+                        if settings.generateTitle and apiResponse.title then
                             photo:setRawMetadata("title", apiResponse.title)
                         end
-                        if apiResponse.caption then
+                        if settings.generateCaption and apiResponse.caption then
                             photo:setRawMetadata("caption", apiResponse.caption)
                         end
-                        if apiResponse.keywords then
+                        if settings.generateKeywords and apiResponse.keywords then
                             addKeywordsWithParent(catalog, photo, apiResponse.keywords)
                         end
                     end
