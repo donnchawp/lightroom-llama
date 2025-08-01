@@ -24,42 +24,83 @@ JSON = (assert(loadfile(LrPathUtils.child(_PLUGIN.path, "JSON.lua"))))()
 
 local function exportThumbnail(photo)
     local tempPath = LrFileUtils.chooseUniqueFileName(LrPathUtils.getStandardFilePath('temp') .. "/thumbnail.jpg")
+    logger:info("Attempting to export thumbnail to: " .. tempPath)
 
+    -- Check if temp directory is accessible
+    local tempDir = LrPathUtils.getStandardFilePath('temp')
+    if not LrFileUtils.exists(tempDir) then
+        logger:error("Temp directory does not exist: " .. tempDir)
+        return nil
+    end
+
+    local thumbnailSaved = false
     local success, result = photo:requestJpegThumbnail(512, 512, function(jpegData)
         -- Save the JPEG thumbnail to the temporary file
         if jpegData then
             local tempFile = io.open(tempPath, "wb")
-            tempFile:write(jpegData)
-            tempFile:close()
-            logger:info("Thumbnail saved to " .. tempPath)
-            return true
+            if tempFile then
+                tempFile:write(jpegData)
+                tempFile:close()
+                thumbnailSaved = true
+                logger:info("Thumbnail saved to " .. tempPath)
+                return true
+            else
+                logger:error("Could not open temp file for writing: " .. tempPath)
+                return false
+            end
+        else
+            logger:error("No JPEG data received from photo")
+            return false
         end
-        return false
     end)
 
-    if success then
-        return tempPath
+    if success and thumbnailSaved then
+        -- Verify the file was actually created
+        if LrFileUtils.exists(tempPath) then
+            logger:info("Thumbnail export successful: " .. tempPath)
+            return tempPath
+        else
+            logger:error("Thumbnail file was not created: " .. tempPath)
+            return nil
+        end
     else
-        logger:warn("Failed to export thumbnail")
+        logger:warn("Failed to export thumbnail. Success: " .. tostring(success) .. ", Result: " .. tostring(result))
         return nil
     end
 end
 
 local function base64EncodeImage(imagePath)
+    logger:info("Attempting to encode image: " .. imagePath)
+
+    -- Check if file exists
+    if not LrFileUtils.exists(imagePath) then
+        logger:error("Image file does not exist: " .. imagePath)
+        return nil
+    end
 
     -- Read the image file as binary
     local file = io.open(imagePath, "rb") -- Open the file in binary mode
     if not file then
-        LrDialogs.message("Error", "Could not open file: " .. imagePath, "critical")
-        return
+        logger:error("Could not open file for reading: " .. imagePath)
+        return nil
     end
 
     local binaryData = file:read("*all") -- Read the entire file as binary data
     file:close() -- Close the file
 
+    if not binaryData or #binaryData == 0 then
+        logger:error("No data read from file: " .. imagePath)
+        return nil
+    end
+
     -- Encode the binary data to Base64
     local base64Data = LrStringUtils.encodeBase64(binaryData)
+    if not base64Data then
+        logger:error("Failed to encode image to base64: " .. imagePath)
+        return nil
+    end
 
+    logger:info("Successfully encoded image to base64. Size: " .. #binaryData .. " bytes")
     return base64Data
 end
 
@@ -78,12 +119,12 @@ local function sendDataToApi(photo, prompt, currentData, useCurrentData, useSyst
     -- Define data to be sent (as a Lua table)
     local postData = {
         model = model,
-        prompt =  (useCurrentData and "Title: "..currentData.title .. " Caption: "..currentData.caption .. prompt) or prompt,
+        prompt =  (useCurrentData and "Title: "..(currentData.title or ""):gsub('"', '\\"') .. " Caption: "..(currentData.caption or ""):gsub('"', '\\"') .. " " .. prompt) or prompt,
         format = "json",
         system = useSystemPrompt and [[You are an AI tasked with creating a JSON object containing a `title`, a `caption`, and a list of `keywords` based on a given piece of content (such as an image or video). ]] ..
         (useCurrentData and [[The content currently has the following metadata which you need to implement and improve upon. It is important to keep the title and caption as close to this as possible.
-Current title: "]] .. (currentData.title or "") .. [["
-Current caption: "]] .. (currentData.caption or "") .. [["
+Current title: "]] .. (currentData.title or ""):gsub('"', '\\"') .. [["
+Current caption: "]] .. (currentData.caption or ""):gsub('"', '\\"') .. [["
 
 ]] or "") .. [[Please follow these detailed guidelines for creating excellent metadata:
 
