@@ -179,6 +179,22 @@ local function addKeywordsWithParent(catalog, photo, keywords)
     end
 end
 
+local function getLlmKeywordsFromPhoto(photo)
+    local llmKeywords = {}
+    local allKeywords = photo:getRawMetadata("keywords")
+
+    if allKeywords then
+        for _, keyword in ipairs(allKeywords) do
+            local parent = keyword:getParent()
+            if parent and parent:getName() == "llm" then
+                table.insert(llmKeywords, keyword:getName())
+            end
+        end
+    end
+
+    return llmKeywords
+end
+
 local function main()
     -- Get the active catalog
     local catalog = LrApplication.activeCatalog()
@@ -201,7 +217,9 @@ local function main()
         props.prompt = "Caption this photo"
         props.title = selectedPhoto:getFormattedMetadata('title')
         props.caption = selectedPhoto:getFormattedMetadata('caption')
-        props.keywords = ""
+        -- Initialize keywords with existing llm keywords
+        local existingLlmKeywords = getLlmKeywordsFromPhoto(selectedPhoto)
+        props.keywords = table.concat(existingLlmKeywords, ", ")
         props.response = ""
         props.useCurrentData = props.title ~= "" or props.caption ~= ""
         props.useSystemPrompt = true
