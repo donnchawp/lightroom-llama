@@ -19,6 +19,10 @@ return {
         title = "Batch Process with Llama...",
         file = "BatchLrLlama.lua",
         enabledWhen = "photosSelected"
+    }, {
+        title = "Reset Metadata...",
+        file = "ResetMetadata.lua",
+        enabledWhen = "photosSelected"
     }},
     LrExportMenuItems = {{
         title = "Lightroom Llama...",
@@ -27,6 +31,10 @@ return {
     }, {
         title = "Batch Process with Llama...",
         file = "BatchLrLlama.lua",
+        enabledWhen = "photosSelected"
+    }, {
+        title = "Reset Metadata...",
+        file = "ResetMetadata.lua",
         enabledWhen = "photosSelected"
     }}
 }
