@@ -34,11 +34,11 @@ end
 
 local function showResetDialog(selectedPhotos)
     local settings = nil
-    
+
     LrFunctionContext.callWithContext("showResetDialog", function(context)
         local props = LrBinding.makePropertyTable(context)
         local prefs = LrPrefs.prefsForPlugin()
-        
+
         -- Initialize with default values or saved preferences
         props.resetTitle = prefs.resetTitle ~= false -- Default to true
         props.resetCaption = prefs.resetCaption ~= false -- Default to true
@@ -115,7 +115,7 @@ local function showResetDialog(selectedPhotos)
             prefs.resetTitle = props.resetTitle
             prefs.resetCaption = props.resetCaption
             prefs.resetKeywords = props.resetKeywords
-            
+
             -- Show final confirmation
             local confirmResult = LrDialogs.confirm(
                 "Confirm Reset",
@@ -133,11 +133,11 @@ local function showResetDialog(selectedPhotos)
             end
         end
     end)
-    
+
     -- Execute the reset OUTSIDE the function context (like BatchLrLlama.lua does)
     if settings then
         local catalog = LrApplication.activeCatalog()
-        
+
         -- Reset all metadata in a single write access call
         catalog:withWriteAccessDo("Reset metadata", function()
             for _, photo in ipairs(selectedPhotos) do
