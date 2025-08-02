@@ -105,11 +105,10 @@ For latest instructions on how to install and run Ollama, see [here](https://git
 5. The selected metadata will be removed
 
 ### Menu Locations
-The plugin adds three menu items under **Library > Plug-in Extras**:
+The plugin adds three menu items under **Library > Plug-in Extras** and **File > Plug-in Extras**:
 - **Lightroom Llama...** - Process individual photos
 - **Batch Process with Llama...** - Process multiple photos
 - **Reset Metadata...** - Remove generated metadata
-The menus are also available in **File > Plug-in Extras**.
 
 ## TODO
 
